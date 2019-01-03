@@ -104,6 +104,7 @@ import System.Exit (ExitCode (ExitSuccess))
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.Char8 as L8
 import Data.String (IsString (fromString))
+import GHC.IO.Exception
 import GHC.RTS.Flags (getConcFlags, ctxtSwitchTime)
 
 #if MIN_VERSION_process(1, 4, 0) && !WINDOWS
@@ -617,11 +618,22 @@ startProcess pConfig'@ProcessConfig {..} = liftIO $ do
         <*> ssCreate pcStdout pConfig moutH
         <*> ssCreate pcStderr pConfig merrH
 
+    -- This is a questionable patch, for usage in
+    -- https://github.com/mgsloan/mgsloan-dotfiles . The issue is that
+    -- programs killed by the user cause an error like
+    --
+    -- > xmonad: waitForProcess: does not exist (No child processes)
+    let waitForProcess =
+          P.waitForProcess pHandle `catch` \ioe ->
+            if ioe_type ioe == NoSuchThing
+              then return ExitSuccess
+              else throwIO ioe
+
     pExitCode <- newEmptyTMVarIO
     waitingThread <- async $ do
         ec <-
           if multiThreadedRuntime
-            then P.waitForProcess pHandle
+            then waitForProcess
             else do
               switchTime <- (fromIntegral . (`div` 1000) . ctxtSwitchTime)
                         <$> getConcFlags
@@ -670,9 +682,9 @@ startProcess pConfig'@ProcessConfig {..} = liftIO $ do
                           -- Recommendation: always use the multi-threaded
                           -- runtime!
                           | isPermissionError e && not multiThreadedRuntime && isWindows ->
-                            P.waitForProcess pHandle
+                            waitForProcess
                           | otherwise -> throwIO e
-                        Right () -> P.waitForProcess pHandle
+                        Right () -> waitForProcess
                     success <- atomically $ tryPutTMVar pExitCode ec
                     evaluate $ assert success ()
 
