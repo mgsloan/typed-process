@@ -12,7 +12,7 @@ module System.Process.Typed
       ProcessConfig
     , StreamSpec
     , StreamType (..)
-    , Process
+    , Process (..)
 
       -- * ProcessConfig
       -- ** Smart constructors
